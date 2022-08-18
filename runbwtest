@@ -1,0 +1,112 @@
+#!/bin/bash
+
+set -eu
+
+if [[ -f ~/.runbwtestrc ]]; then
+	. ~/.runbwtestrc
+fi
+
+: ${port:=55522}
+: ${serveropts:="-D -d"}
+: ${clientopts:="127.0.0.1"}
+: ${prefix:=""}
+
+sshOpt=""
+sshdOpt=""
+alt=0
+none=0
+inf=0
+
+while getopts ":c:d:ahn0" opt; do
+	case "${opt}" in
+		c)
+			sshOpt="${OPTARG}"
+			;;
+		d)
+			sshdOpt="${OPTARG}"
+			;;
+		a)
+			alt=1;
+			;;
+		h)
+			sshOpt="hpnssh"
+			sshdOpt="hpnsshd"
+			;;
+		n)
+			none=1;
+			;;
+		0)
+			inf=1;
+			;;
+	esac
+done
+shift $((OPTIND-1))
+
+scriptdir="$(dirname -- "$( readlink -f -- "$0"; )";)"
+logfile="${scriptdir}/sshd.log"
+ddcmd="${scriptdir}/mwdd"
+
+if [[ -n "${sshOpt}" ]]; then
+	if [[ "${sshOpt}" == /* ]]; then
+		sshcmd="${sshOpt}"
+	else
+		sshcmd="${prefix}/bin/${sshOpt}"
+	fi
+else
+	sshcmd="${prefix}/bin/ssh"
+fi
+
+if [[ -n "${sshdOpt}" ]]; then
+	if [[ "${sshdOpt}" == /* ]]; then
+		sshdcmd="${sshdOpt}"
+	else
+		sshdcmd="${prefix}/sbin/${sshdOpt}"
+	fi
+else
+	rawdir="$(dirname "${sshcmd}")/../sbin"
+	dir=$(realpath ${rawdir})
+	file=$(basename "${sshcmd}")
+	sshdcmd="${dir}/${file}d"
+fi
+
+sshddate=$(date -r "${sshdcmd}")
+sshdate=$(date -r "${sshcmd}")
+
+echo "Now:                  $(date)"
+echo "Server last modified: ${sshddate}"
+echo "Cliend last modified: ${sshdate}"
+echo
+echo "Starting server..."
+
+cmdopts="${serveropts} -p ${port}"
+if [[ ${none} -eq 1 ]]; then
+	cmdopts="${cmdopts} -o NoneEnabled=yes -o NoneMacEnabled=yes"
+fi
+echo "\""${sshdcmd}"\"" ${cmdopts} "&>""${logfile}"
+"${sshdcmd}" ${cmdopts} &>"${logfile}" &
+
+echo "Backgrounded. Writing log to \"${logfile}\"."
+echo
+
+sleep 3
+
+echo "Starting client..."
+
+cmdopts="${clientopts} -p ${port}"
+if [[ ${none} -eq 1 ]]; then
+	cmdopts="${cmdopts} -o NoneEnabled=yes -o NoneMacEnabled=yes -o NoneSwitch=yes"
+else
+	cmdopts="${cmdopts} -c chacha20-poly1305@openssh.com"
+fi
+ddopts="bs=1M iflag=fullblock"
+if [[ ${inf} == "0" ]]; then
+	ddopts="${ddopts} count=51200"
+fi
+
+if [[ ${alt} == "0" ]]; then
+	echo "dd if=/dev/zero ${ddopts} | \"${sshcmd}\" ${cmdopts} \"cat - > /dev/null\""
+	${ddcmd} if=/dev/zero ${ddopts} | "${sshcmd}" ${cmdopts} "cat - > /dev/null"
+else
+	echo "\"${sshcmd}\" ${cmdopts} \"dd of=/dev/null ${ddopts}\" < /dev/zero"
+	"${sshcmd}" ${cmdopts} "${ddcmd} of=/dev/null ${ddopts}" < /dev/zero
+fi

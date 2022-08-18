@@ -1,0 +1,37 @@
+#!/bin/bash
+
+function fmt1024 {
+	numfmt --format='%12.4f' --round=nearest --suffix=B --to=iec-i $1
+}
+function fmt1000 {
+	numfmt --format='%11.4f' --round=nearest --suffix=B --to=si $1
+}
+function fmtTime {
+	if awk "BEGIN {exit !($1 <= 60)}"; then
+		echo $1 | awk '{printf "  %7.4fs\n",$1}'
+	elif awk "BEGIN {exit !($1 <= 3600)}"; then
+		echo $1 | awk '{printf "%7.4fmin\n",$1/60}'
+	elif awk "BEGIN {exit !($1 <= 86400)}"; then
+		echo $1 | awk '{printf "  %7.4fh\n",$1/3600}'
+	else
+		echo $1 | awk '{printf "  %7.4fd\n",$1/86400}'
+	fi
+}
+
+function ddfmt {
+	ddstats=$(cat - | grep bytes | awk '{printf "%s %.4f %.4f\n", $1, $8, $1/$8}')
+	a=$(cut -d ' ' -f1 <<<${ddstats})
+	b=$(cut -d ' ' -f2 <<<${ddstats})
+	c=$(cut -d ' ' -f3 <<<${ddstats})
+	a1=$(fmt1024 $a)
+	b1=$(fmtTime $b)
+	c1=$(fmt1024 $c)
+	a2=$(fmt1000 $a)
+	b2=$(fmtTime $b)
+	c2=$(fmt1000 $c)
+
+	echo "${a1} ${b1} ${c1}/s" 1>&2
+	echo "${a2}  ${b2} ${c2}/s " 1>&2
+}
+
+dd $@ 2> >(ddfmt)
